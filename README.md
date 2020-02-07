@@ -1,6 +1,6 @@
-###### **Cisco CTR API Investigation Bot for Webex Teams**
+## **Cisco CTR API Investigation Bot for Webex Teams**
 
-This is a demonstration of a Proof of Concept webex Chat Bot, leveraging Cisco Threat Response API to do investigations, correlation and enrichment of submitted IoCs.
+This is a Proof of Concept webex Chat Bot, leveraging Cisco Threat Response API to do investigations, correlation and enrichment of submitted IoCs.
 
 To run this script, you need a [Webex Developer account](https://developer.webex.com/login), and to follow this documentation to [create a Bot](https://developer.webex.com/docs/bots). [Example of Bot Creation](https://developer.webex.com/blog/spark-bot-demo)
 This script will use a Webex Teams Room to log every message sent to and from your Bot. So you will also need to create a room in Webex Teams and include your new Bot in it. Use this [API call](https://developer.webex.com/docs/api/v1/rooms/list-rooms) to find the roomId.
