@@ -1,5 +1,4 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from io import BytesIO
 import urllib.request as urllib2
 import json
 import re
