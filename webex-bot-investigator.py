@@ -1,48 +1,21 @@
-from itty import *
-import urllib2
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from io import BytesIO
+import urllib.request as urllib2
 import json
 import re
 import requests
 from operator import itemgetter
 from threatresponse import ThreatResponse
-
-################################################  CHANGE THIS VALUES ##################################################
-
-### WEBEXT TEAMS CHAT BOT VALUES ####
-bot_email = "mybotname@webex.bot"
-bot_name = "MY_BOT_NAME"
-# BOT ACCESS TOKEN
-bearer = "012345678ABCDEFGH"
-webhook_url = 'https://MYURL.ngrok.io'
-webhook_name = 'MY_WEBHOOK_NAME'
-roomid_filter = 'YOUR_ROOM_ID'
-
-### THRESHOLD FOR TG BEHAVIOURAL INDICATORS REPORTING ###
-tg_severity_threshold = 75
-
-### API KEYS TO USE ###
-
-### UMBRELLA-INVESTIGATE API-KEY ###
-investigate_token = 'xxxxxxxxxxxxxxxxxxxx'
-### THREATGRID API-KEY ###
-api_key = 'xxxxxxxxxxxxxxxxxxxx'
-### CTR API CLIENT-ID ###
-ctr_client_id = 'xxxxxxxxxxxxxxxxxxxx'
-### CTR API CLIENT-PASSWORD ###
-ctr_client_password = 'xxxxxxxxxxxxxxxxxxxx'
-
-### PROTECTED NETWORK CONFIG ###
-protectednet = '10.0.0.0/8'
-protecteddomain = 'example.com'
-
-#######################################################################################################################
+from config import *
 
 global_targets_list = []
 umbrella_categories = {}
 webhook_roomid = ''
 investigation_report = []
 observable_types_list = []
-debugflag = False # USED FOR OFF-CHAT DEBUG
+
+# USED FOR OFF-LINE DEBUG
+debug_flag = False
 
 regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
             25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -54,11 +27,56 @@ client = ThreatResponse(
     client_password=ctr_client_password,
 )
 
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        body = self.rfile.read(content_length)
+        self.send_response(200)
+        self.end_headers()
+        # response = BytesIO()
+        # response.write(b'This is POST request. ')
+        # response.write(b'Received: ')
+        # response.write(body)
+        # self.wfile.write(response.getvalue())
+        global investigation_report
+        print(body)
+        webhook = json.loads(body)
+        result = send_spark_get('https://api.ciscospark.com/v1/messages/{0}'.format(webhook['data']['id']))
+        result = json.loads(result)
+        if webhook['data']['personEmail'] != bot_email:
+            in_message = result.get('text', '').lower()
+            in_message = in_message.replace(bot_name.lower(), '')
+            if in_message.startswith('help'):
+                msg = "**How To Use:**\n- *help*, bring this help; \n- *investigate*, put your indicators in free " \
+                      "form or with types specified explicitly (<type>:\"observable\"), types:  " \
+                      "\n    - " + '  \n    - '.join(observable_types_list)
+
+                send_spark_post("https://api.ciscospark.com/v1/messages",
+                                {"roomId": webhook['data']['roomId'], "markdown": msg})
+            else:
+                send_spark_post("https://api.ciscospark.com/v1/messages",
+                                {"roomId": webhook['data']['roomId'], "markdown": "*Let the investigation begin...*"})
+
+                analyze_string_investigation(in_message)
+
+                send_spark_post("https://api.ciscospark.com/v1/messages",
+                                {"roomId": webhook['data']['roomId'],
+                                 "markdown": "***  \n" + '  \n'.join(investigation_report) + "\n\n***"})
+
+                send_spark_post("https://api.ciscospark.com/v1/messages",
+                                {"roomId": webhook['data']['roomId'],
+                                 "markdown": "*Mission accomplished, observe my findings above...*"})
+            investigation_report = []
+
+        return "true"
+
+
 def json_loads_byteified(json_text):
     return _byteify(
         json.loads(json_text, object_hook=_byteify),
         ignore_dicts=True
     )
+
 
 def json_load_byteified(file_handle):
     return _byteify(
@@ -66,26 +84,29 @@ def json_load_byteified(file_handle):
         ignore_dicts=True
     )
 
-def _byteify(data, ignore_dicts = False):
-    if isinstance(data, unicode):
+
+def _byteify(data, ignore_dicts=False):
+    if type(data) == 'str':
         return data.encode('utf-8')
     if isinstance(data, list):
-        return [ _byteify(item, ignore_dicts=True) for item in data ]
+        return [_byteify(item, ignore_dicts=True) for item in data]
     if isinstance(data, dict) and not ignore_dicts:
         return {
             _byteify(key, ignore_dicts=True): _byteify(value, ignore_dicts=True)
-            for key, value in data.iteritems()
+            for key, value in data.items()
         }
     return data
 
-def check(Ip):
-    if (re.search(regex, Ip)):
+
+def check(ip):
+    if re.search(regex, ip):
         return True
 
     else:
         return False
 
-def sendSparkGET(url):
+
+def send_spark_get(url):
     request = urllib2.Request(url,
                               headers={"Accept": "application/json",
                                        "Content-Type": "application/json"})
@@ -94,67 +115,69 @@ def sendSparkGET(url):
     return contents
 
 
-def sendSparkPOST(url, data):
-    request = urllib2.Request(url, json.dumps(data),
+def send_spark_post(url, data):
+    request = urllib2.Request(url, json.dumps(data).encode('utf-8'),
                               headers={"Accept": "application/json",
                                        "Content-Type": "application/json"})
     request.add_header("Authorization", "Bearer " + bearer)
     contents = urllib2.urlopen(request).read()
     return contents
 
-@post('/')
+
 def index(request):
     global investigation_report
+    print(request)
     webhook = json.loads(request.body)
-    print
-    webhook['data']['id']
-    result = sendSparkGET('https://api.ciscospark.com/v1/messages/{0}'.format(webhook['data']['id']))
+    result = send_spark_get('https://api.ciscospark.com/v1/messages/{0}'.format(webhook['data']['id']))
     result = json.loads(result)
-    msg = None
     if webhook['data']['personEmail'] != bot_email:
         in_message = result.get('text', '').lower()
         in_message = in_message.replace(bot_name.lower(), '')
         if in_message.startswith('help'):
-            msg = "**How To Use:**\n- *help*, bring this help; \n- *investigate*, put your indicators in free form or with types specified explicitly (<type>:\"observable\"), types:  \n    - " + '  \n    - '.join(observable_types_list)
+            msg = "**How To Use:**\n- *help*, bring this help; \n- *investigate*, put your indicators in free " \
+                  "form or with types specified explicitly (<type>:\"observable\"), types:  " \
+                  "\n    - " + '  \n    - '.join(observable_types_list)
 
-
-            sendSparkPOST("https://api.ciscospark.com/v1/messages",
-                          {"roomId": webhook['data']['roomId'], "markdown": msg})
+            send_spark_post("https://api.ciscospark.com/v1/messages",
+                            {"roomId": webhook['data']['roomId'], "markdown": msg})
         else:
-            sendSparkPOST("https://api.ciscospark.com/v1/messages",
-                          {"roomId": webhook['data']['roomId'], "markdown": "*Let the investigation begin...*"})
+            send_spark_post("https://api.ciscospark.com/v1/messages",
+                            {"roomId": webhook['data']['roomId'], "markdown": "*Let the investigation begin...*"})
 
             analyze_string_investigation(in_message)
 
-            sendSparkPOST("https://api.ciscospark.com/v1/messages",
-                              {"roomId": webhook['data']['roomId'], "markdown": "***  \n" + '  \n'.join(investigation_report) + "\n\n***"})
+            send_spark_post("https://api.ciscospark.com/v1/messages",
+                            {"roomId": webhook['data']['roomId'], "markdown": "***  \n" + '  \n'.join(investigation_report) + "\n\n***"})
 
-            sendSparkPOST("https://api.ciscospark.com/v1/messages",
-                          {"roomId": webhook['data']['roomId'],
+            send_spark_post("https://api.ciscospark.com/v1/messages",
+                            {"roomId": webhook['data']['roomId'],
                            "markdown": "*Mission accomplished, observe my findings above...*"})
         investigation_report = []
 
     return "true"
 
+
 def ip_to_binary(ip):
     octet_list_int = ip.split(".")
     octet_list_bin = [format(int(i), '08b') for i in octet_list_int]
-    binary = ("").join(octet_list_bin)
+    binary = "".join(octet_list_bin)
     return binary
 
+
 def get_addr_network(address, net_size):
-    #Convert ip address to 32 bit binary
+    # Convert ip address to 32 bit binary
     ip_bin = ip_to_binary(address)
-    #Extract Network ID from 32 binary
+    # Extract Network ID from 32 binary
     network = ip_bin[0:32-(32-net_size)]
     return network
 
+
 def ip_in_prefix(ip_address, prefix):
-    #CIDR based separation of address and network size
+    # CIDR based separation of address and network size
     [prefix_address, net_size] = prefix.split("/")
-    #Convert string to int
+    # Convert string to int
     net_size = int(net_size)
-    #Get the network ID of both prefix and ip based net size
+    # Get the network ID of both prefix and ip based net size
     prefix_network = get_addr_network(prefix_address, net_size)
     ip_network = get_addr_network(ip_address, net_size)
     return ip_network == prefix_network
@@ -162,15 +185,16 @@ def ip_in_prefix(ip_address, prefix):
 
 def webex_print(header, message):
     global investigation_report
-    if debugflag:
+    if debug_flag:
         print(header + message.replace('\n', ''))
     investigation_report.append(header + message)
-
     return
 
-def query_threatgrid(type,value):
 
-    url = "https://panacea.threatgrid.com/api/v2/search/submissions?q=" + value +"&api_key=" + api_key + "&advanced=true"
+# noinspection PyTypeChecker
+def query_threatgrid(type, value):
+
+    url = "https://panacea.threatgrid.com/api/v2/search/submissions?q=" + value + "&api_key=" + api_key + "&advanced=true"
     headers = {
         'Cache-Control': "no-cache",
         'Content-Type': "application/json",
@@ -178,8 +202,8 @@ def query_threatgrid(type,value):
 
     response = requests.request("GET", url, headers=headers)
     data = json_loads_byteified(response.text)
-    IOCS_list = []
-    IOCS_dict = []
+    iocs_list = []
+    iocs_dict = []
     for item in data['data']['items']:
         if 'analysis' in item['item']:
             if 'behaviors' in item['item']['analysis']:
@@ -189,11 +213,11 @@ def query_threatgrid(type,value):
                         continue
                     else:
                         iocfull = str(ioc['threat']) + " - " + ioc['title']
-                        if iocfull not in IOCS_list:
-                            IOCS_list.append(iocfull)
-                            IOCS_dict.append({'threat': ioc['threat'], 'title': ioc['title']})
+                        if iocfull not in iocs_list:
+                            iocs_list.append(iocfull)
+                            iocs_dict.append({'threat': ioc['threat'], 'title': ioc['title']})
 
-    sorted_d = sorted(IOCS_dict, key=itemgetter('threat'),reverse=True)
+    sorted_d = sorted(iocs_dict, key=itemgetter('threat'), reverse=True)
     for ioc in sorted_d:
         webex_print("- *Indicator*: ", str(ioc['threat']) + ' - ' + ioc['title'])
 
@@ -212,8 +236,10 @@ def get_umbrella_categories_list():
     response = requests.request("GET", url, headers=headers)
     umbrella_categories = json_loads_byteified(response.text)
 
-def investigate_lookup_for_domain(domain_investigate,lastseen):
-    #lastseen argument is not used in this script, function imported from another script
+
+# noinspection PyTypeChecker
+def investigate_lookup_for_domain(domain_investigate, lastseen):
+    # lastseen argument is not used in this script, function imported from another script
 
     headers = {
         'Authorization': "Bearer " + investigate_token,
@@ -226,7 +252,7 @@ def investigate_lookup_for_domain(domain_investigate,lastseen):
     for domain in data:
         sec_category = ""
         for cat in data[domain]['security_categories']:
-            sec_category = sec_category + ", " + umbrella_categories[cat]
+            sec_category += ", " + umbrella_categories[cat]
 
         content_category = ""
         for cat in data[domain]['content_categories']:
@@ -240,13 +266,12 @@ def investigate_lookup_for_domain(domain_investigate,lastseen):
         elif str(data[domain]['status']) == "1":
             status = "Benign"
 
-
-        if len(sec_category.strip(", "))>0 and len(content_category.strip(", "))>0:
+        if len(sec_category.strip(", ")) > 0 and len(content_category.strip(", ")) > 0:
             webex_print("- *Known hosted domain*: ", domain_investigate + " *Status:* " + status + " *SecurityCat.:* " + sec_category.strip(", ") + " *ContentCat.:* " + content_category.strip(", "))
-        elif len(sec_category.strip(", "))>0:
+        elif len(sec_category.strip(", ")) > 0:
             webex_print("- *Known hosted domain*: ",
                         domain_investigate + " *Status:* " + status + " *SecurityCat.:* " + sec_category.strip(", "))
-        elif len(content_category.strip(", "))>0:
+        elif len(content_category.strip(", ")) > 0:
             webex_print("- *Known hosted domain*: ",
                         domain_investigate + " *Status:* " + status + " *ContentCat.:* " + content_category.strip(", "))
         else:
@@ -266,20 +291,21 @@ def investigate_lookup_for_ip(ip_address):
     response = requests.request("GET", url, headers=headers)
     data = json_loads_byteified(response.text)
 
-    domainlist = []
+    domain_list = []
     for domain in data['rrs']:
         domain['rr'] = domain['rr'].strip('.')
-        domainlist.append(domain['rr'])
+        domain_list.append(domain['rr'])
 
     count = 0
-    for domain_investigate in domainlist:
+    for domain_investigate in domain_list:
         if count > 10:
             webex_print("", '*... results limited to 10*')
             break
-        count = count + 1
-        investigate_lookup_for_domain(domain_investigate,'')
+        count += 1
+        investigate_lookup_for_domain(domain_investigate, '')
 
 
+# noinspection PyTypeChecker
 def analyze_string_investigation(indicators):
 
     global global_targets_list
@@ -292,8 +318,8 @@ def analyze_string_investigation(indicators):
         webex_print("", "**[OBSERVABLE]** *Type*: " + indicator['type'] + " *Value*: " + indicator['value'] + "\n")
         response = client.enrich.observe.observables(indicators_parse)
         result_dump = json.dumps(response)
-        if debugflag:
-            print result_dump
+        if debug_flag:
+            print(result_dump)
         result_loads = json.loads(result_dump)
 
         for module in result_loads['data']:
@@ -320,7 +346,7 @@ def analyze_string_investigation(indicators):
                     if count > 10:
                         webex_print("", '*... results limited to 10*')
                         break
-                    count = count + 1
+                    count += 1
                     webex_print("- *Judgements*: ", judgement)
             if "indicators" in module['data']:
                 count = 0
@@ -328,7 +354,7 @@ def analyze_string_investigation(indicators):
                     if count > 10:
                         webex_print("", '*... results limited to 10*')
                         break
-                    count = count + 1
+                    count += 1
                     if 'short_description' in doc:
                         description = doc['short_description']
                     else:
@@ -336,15 +362,14 @@ def analyze_string_investigation(indicators):
                     webex_print("- *Indicator*: ", description)
 
             # SIGHTINGS FOR OTHER
-            if module['module'] == 'Firepower' or module['module'] == 'Private Intelligence' or module[
-                'module'] == 'Stealthwatch Enterprise' or module['module'] == 'VirusTotal':
+            if module['module'] == 'Firepower' or module['module'] == 'Private Intelligence' or module['module'] == 'Stealthwatch Enterprise' or module['module'] == 'VirusTotal':
                 if 'sightings' in module['data']:
                     count = 0
                     for doc in module['data']['sightings']['docs']:
                         if count > 10:
                             webex_print("", '*... results limited to 10*')
                             break
-                        count = count + 1
+                        count += 1
                         source = ''
                         destination = ''
                         if 'short_description' in doc:
@@ -358,7 +383,7 @@ def analyze_string_investigation(indicators):
                                 if count_1 > 10:
                                     webex_print("", '*... results limited to 10*')
                                     break
-                                count_1 = count_1 + 1
+                                count_1 += 1
                                 if 'source' in relation:
                                     source = relation['source']['value']
                                     if module['module'] != 'VirusTotal' and check(source):
@@ -394,11 +419,11 @@ def analyze_string_investigation(indicators):
                                         targets_list.append(hostname)
                                         targets_list_dicts.append({'hostname': hostname, 'ip': ip, 'mac': mac})
                                         if hostname not in global_targets_list:
-                                            if len(ip)>0:
-                                                ipaddress = "(" + ip + ")"
+                                            if len(ip) > 0:
+                                                ip_address = "(" + ip + ")"
                                             else:
-                                                ipaddress = ''
-                                            global_targets_list.append(hostname + ipaddress)
+                                                ip_address = ''
+                                            global_targets_list.append(hostname + ip_address)
                     for target in targets_list_dicts:
                         webex_print("- *Target*: ",
                                     "Hostname: " + target['hostname'] + " IP: " + target['ip'] + " MAC: " + target[
@@ -410,47 +435,49 @@ def analyze_string_investigation(indicators):
                     targets_list = []
                     for doc in module['data']['sightings']['docs']:
                         if 'relations' in doc:
-                            srcip = ''
-                            fromaddr = ''
-                            toaddr = ''
+                            src_ip = ''
+                            from_address = ''
+                            to_address = ''
                             mid = ''
                             subject = ''
                             for relation in doc['relations']:
-
                                 if 'ip' in relation['source']['type']:
-                                    srcip = relation['source']['value']
+                                    src_ip = relation['source']['value']
                                 if 'email' in relation['source']['type']:
-                                    fromaddr = relation['source']['value']
+                                    from_address = relation['source']['value']
                                 if 'cisco_mid' in relation['source']['type']:
                                     mid = relation['source']['value']
                                 if 'email_subject' in relation['related']['type']:
                                     subject = relation['related']['value']
                                 if 'email' in relation['related']['type']:
-                                    toaddr = relation['related']['value']
-                            webex_print("- *Sighting*: ",
-                                        "SRC IP: " + srcip + " From: " + fromaddr + " MID: " + mid + " To: " + toaddr + " Subject: " + subject)
-                            if fromaddr not in targets_list and fromaddr.find(protecteddomain) != -1:
-                                targets_list.append(fromaddr)
-                                if fromaddr not in global_targets_list:
-                                    global_targets_list.append(fromaddr)
+                                    to_address = relation['related']['value']
 
-                            if toaddr not in targets_list and toaddr.find(protecteddomain) != -1:
-                                targets_list.append(toaddr)
-                                if toaddr not in global_targets_list:
-                                    global_targets_list.append(toaddr)
+                            webex_print("- *Sighting*: ",
+                                        "SRC IP: " + src_ip + " From: " + from_address + " MID: " + mid + " To: " + to_address + " Subject: " + subject)
+
+                            if from_address not in targets_list and from_address.find(protecteddomain) != -1:
+                                targets_list.append(from_address)
+                                if from_address not in global_targets_list:
+                                    global_targets_list.append(from_address)
+
+                            if to_address not in targets_list and to_address.find(protecteddomain) != -1:
+                                targets_list.append(to_address)
+                                if to_address not in global_targets_list:
+                                    global_targets_list.append(to_address)
 
             if module['module'] == 'Threat Grid':
-                query_threatgrid(indicator['type'],indicator['value'])
+                query_threatgrid(indicator['type'], indicator['value'])
 
             if module['module'] == 'Umbrella':
                 if indicator['type'] == 'ip':
                     investigate_lookup_for_ip(indicator['value'])
 
-
     webex_print("", '\n**[All Targets]**\n')
+
     for target in global_targets_list:
-        webex_print('',"- " + target)
+        webex_print('', "- " + target)
     global_targets_list = []
+
 
 def delete_webhook(webhook_id):
 
@@ -462,7 +489,8 @@ def delete_webhook(webhook_id):
         'Authorization': "Bearer " + bearer
     }
 
-    response = requests.request("DELETE", url, headers=headers, data=payload)
+    requests.request("DELETE", url, headers=headers, data=payload)
+
 
 def add_webhook():
 
@@ -474,6 +502,8 @@ def add_webhook():
     }
 
     response = requests.request("POST", url, headers=headers, data=payload)
+    print(response)
+
 
 def update_webhook():
 
@@ -484,7 +514,8 @@ def update_webhook():
         'Authorization': 'Bearer ' + bearer
     }
 
-    response = requests.request("PUT", url, headers=headers, data=payload)
+    requests.request("PUT", url, headers=headers, data=payload)
+
 
 def delete_room(room_id):
     # DOES NOT DELETE 1-to-1 ROOMS
@@ -495,8 +526,9 @@ def delete_room(room_id):
         'Authorization': 'Bearer ' + bearer
     }
 
-    response = requests.request("DELETE", url, headers=headers, data=payload)
-    print "    === ROOM DELETED ==="
+    requests.request("DELETE", url, headers=headers, data=payload)
+    print("    === ROOM DELETED ===")
+
 
 def get_bot_status():
 
@@ -510,55 +542,60 @@ def get_bot_status():
 
     response = requests.request("GET", url, headers=headers, data=payload)
     data = json_loads_byteified(response.text)
-    print "Bot is currently member of Webex Rooms:"
+    print("Bot is currently member of Webex Rooms:")
     if 'items' in data:
         for room in data['items']:
-            print " => Title: " + room['title'].encode('utf8')
-            print "    " + " ID: " + room['id']
+            print(" => Title: {}".format(room['title'].encode('utf8')))
+            print("     ID: {}".format(room['id']))
             if room['id'] != roomid_filter:
                 delete_room(room['id'])
-
 
     url = "https://api.ciscospark.com/v1/webhooks"
     response = requests.request("GET", url, headers=headers, data=payload)
     data = json_loads_byteified(response.text)
-    print "Bot is currently configured with webhooks:"
+    print("Bot is currently configured with webhooks:")
     if 'items' in data:
         for webhook in data['items']:
-            print " => ID: " + webhook['id']
-            print "    " + "Name: " + webhook['name'].encode('utf8')
-            print "    " + "Url: " + webhook['targetUrl']
-            print "    " + "Status: " + webhook['status']
+            print(" => ID: {}".format(webhook['id']))
+            print("     Name: {}".format(webhook['name'].encode('utf8')))
+            print("     Url: {}".format(webhook['targetUrl']))
+            print("    Status: {}".format(webhook['status']))
 
-            if webhook['name'].encode('utf8') != webhook_name:
+            if webhook['name'] != webhook_name:
                 delete_webhook(webhook['id'])
-                print "    === REMOVED ==="
-            if webhook['status'].encode('utf8') != 'active':
+                print("    === REMOVED ===")
+            if webhook['status'] != 'active':
                 update_webhook()
-                print "    === STATUS UPDATED ==="
+                print("    === STATUS UPDATED ===")
             if webhook['filter'] != 'roomId=' + roomid_filter:
                 delete_webhook(webhook['id'])
-                print "    === REMOVED ==="
+                print("    === REMOVED ===")
                 add_webhook()
-                print "    === ADDED WEBHOOK ==="
+                print("    === ADDED WEBHOOK ===")
+        if len(data['items']) == 0:
+            add_webhook()
+            print("    === ADDED WEBHOOK ===")
+
 
 def main():
 
-    get_bot_status() #PRE-START-CHECKUP
+    get_bot_status()  # PRE-START-CHECKUP
 
     global observable_types_list
 
-    observable_types='file_path, mac_address, device, hostname, url, user, ipv6, email, sha256, sha1, md5, ip, domain, email_subject, imei, amp_computer_guid, cisco_mid, pki_serial, imsi, amp-device, file_name'
-    observable_types_list = observable_types.replace(' ','').split(",")
+    observable_types = 'file_path, mac_address, device, hostname, url, user, ipv6, email, sha256, sha1, md5, ip, domain, email_subject, imei, amp_computer_guid, cisco_mid, pki_serial, imsi, amp-device, file_name'
+    observable_types_list = observable_types.replace(' ', '').split(",")
 
     get_umbrella_categories_list()
 
-    if debugflag:
-        indicators = raw_input("Indicators: ")
+    if debug_flag:
+        indicators = input(r"Indicators: ")
         analyze_string_investigation(indicators)
         print('  \n'.join(investigation_report))
 
-    run_itty(server='wsgiref', host='0.0.0.0', port=3000)
+    httpd = HTTPServer(('localhost', 3000), SimpleHTTPRequestHandler)
+    httpd.serve_forever()
+
 
 if __name__== "__main__":
-  main()
+    main()

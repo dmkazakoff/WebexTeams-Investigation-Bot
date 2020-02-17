@@ -13,8 +13,8 @@ Script itself will create webhook with needed parameters, which you'll include i
 2. BOT name (received on bot creation).
 3. BOT Access token (received on bot creation).
 4. WEBHook url, where the webhooks are sent from your bot, possible options:    
-        - Host your script with direct internet-access/port-forwarding to a port tcp/3000 (default) which script listens.  
-        - Use [Ngrok](https://ngrok.com/) to be able to run it on you laptop with no worries for firewalls, certificates etc. (Good choiсe for fast start)
+        - (Not tested yet) Host your script with direct internet-access/port-forwarding to a port tcp/3000 (default) which script listens.  
+        - (Working option) Use [Ngrok](https://ngrok.com/) to be able to run it on you laptop with no worries for firewalls, certificates etc. (Good choiсe for fast start)
 4. RoomID (Use [this](https://developer.webex.com/docs/api/v1/rooms/list-rooms) API call to find it), which you've created and invited your freshly created bot into it.
 5. API Keys:  
         - Umbrella Investigate API token;  
@@ -24,4 +24,4 @@ Script itself will create webhook with needed parameters, which you'll include i
         - Protected network prefix (e.g. 10.0.0.0/8);  
         - Protected email domain (e.g. example.com);
         
-**Used:** Python 2.7
+**Used:** Python 3.x Support
