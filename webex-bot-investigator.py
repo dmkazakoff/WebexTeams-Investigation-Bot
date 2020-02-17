@@ -39,7 +39,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         # response.write(body)
         # self.wfile.write(response.getvalue())
         global investigation_report
-        print(body)
+        # print(body)
         webhook = json.loads(body)
         result = send_spark_get('https://api.ciscospark.com/v1/messages/{0}'.format(webhook['data']['id']))
         result = json.loads(result)
