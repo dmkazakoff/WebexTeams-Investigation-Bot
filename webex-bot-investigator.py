@@ -1,6 +1,7 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request as urllib2
 import json
+import ssl
 import re
 import requests
 from operator import itemgetter
@@ -12,6 +13,11 @@ umbrella_categories = {}
 webhook_roomid = ''
 investigation_report = []
 observable_types_list = []
+umbrella_module = True
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 
 # USED FOR OFF-LINE DEBUG
 debug_flag = False
@@ -77,7 +83,6 @@ def json_load_byteified(file_handle):
         ignore_dicts=True
     )
 
-
 def _byteify(data, ignore_dicts=False):
     if type(data) == 'str':
         return data.encode('utf-8')
@@ -104,7 +109,7 @@ def send_spark_get(url):
                               headers={"Accept": "application/json",
                                        "Content-Type": "application/json"})
     request.add_header("Authorization", "Bearer " + bearer)
-    contents = urllib2.urlopen(request).read()
+    contents = urllib2.urlopen(request, context=ctx).read()
     return contents
 
 
@@ -113,7 +118,7 @@ def send_spark_post(url, data):
                               headers={"Accept": "application/json",
                                        "Content-Type": "application/json"})
     request.add_header("Authorization", "Bearer " + bearer)
-    contents = urllib2.urlopen(request).read()
+    contents = urllib2.urlopen(request, context=ctx).read()
     return contents
 
 
@@ -227,7 +232,12 @@ def get_umbrella_categories_list():
     }
 
     response = requests.request("GET", url, headers=headers)
-    umbrella_categories = json_loads_byteified(response.text)
+    if response.status_code > 400:
+        print("ERROR: Invalid Umbrella Investigate token! Disabling Umbrella Queries!")
+        umbrella_module = False
+        # exit()
+    else:
+        umbrella_categories = json_loads_byteified(response.text)
 
 
 # noinspection PyTypeChecker
@@ -295,7 +305,8 @@ def investigate_lookup_for_ip(ip_address):
             webex_print("", '*... results limited to 10*')
             break
         count += 1
-        investigate_lookup_for_domain(domain_investigate, '')
+        if umbrella_module == True:
+            investigate_lookup_for_domain(domain_investigate, '')
 
 
 # noinspection PyTypeChecker
@@ -463,7 +474,8 @@ def analyze_string_investigation(indicators):
 
             if module['module'] == 'Umbrella':
                 if indicator['type'] == 'ip':
-                    investigate_lookup_for_ip(indicator['value'])
+                    if umbrella_module == True:
+                        investigate_lookup_for_ip(indicator['value'])
 
     webex_print("", '\n**[All Targets]**\n')
 
@@ -552,20 +564,26 @@ def get_bot_status():
             print(" => ID: {}".format(webhook['id']))
             print("     Name: {}".format(webhook['name'].encode('utf8')))
             print("     Url: {}".format(webhook['targetUrl']))
-            print("    Status: {}".format(webhook['status']))
+            print("     Status: {}".format(webhook['status']))
 
             if webhook['name'] != webhook_name:
+                print("    === REMOVING WEBHOOK ===")
                 delete_webhook(webhook['id'])
                 print("    === REMOVED ===")
             if webhook['status'] != 'active':
+                print("    === UPDATING WEBHOOK STATUS ===")
                 update_webhook()
                 print("    === STATUS UPDATED ===")
-            if webhook['filter'] != 'roomId=' + roomid_filter:
+            if (webhook['filter'] != 'roomId=' + roomid_filter) or (webhook['targetUrl'] != webhook_url):
+                print("    === DELETING WEBHOOK ===")
                 delete_webhook(webhook['id'])
                 print("    === REMOVED ===")
+                print("    === ADDING WEBHOOK ===")
                 add_webhook()
                 print("    === ADDED WEBHOOK ===")
+
         if len(data['items']) == 0:
+            print("    === NO WEBHOOKS DETECTED ===")
             add_webhook()
             print("    === ADDED WEBHOOK ===")
 
