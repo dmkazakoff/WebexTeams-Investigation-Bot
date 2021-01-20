@@ -574,7 +574,8 @@ def get_bot_status():
                 print("    === UPDATING WEBHOOK STATUS ===")
                 update_webhook()
                 print("    === STATUS UPDATED ===")
-            if (webhook['filter'] != 'roomId=' + roomid_filter) or (webhook['targetUrl'] != webhook_url):
+            # if (webhook['filter'] != 'roomId=' + roomid_filter) or (webhook['targetUrl'] != webhook_url):
+            if webhook['targetUrl'] != webhook_url:
                 print("    === DELETING WEBHOOK ===")
                 delete_webhook(webhook['id'])
                 print("    === REMOVED ===")
