@@ -20,7 +20,7 @@ ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
 # USED FOR OFF-LINE DEBUG
-debug_flag = False
+debug_flag = True
 
 regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
             25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -192,7 +192,7 @@ def webex_print(header, message):
 # noinspection PyTypeChecker
 def query_threatgrid(type, value):
 
-    url = "https://panacea.threatgrid.com/api/v2/search/submissions?q=" + value + "&api_key=" + api_key + "&advanced=true"
+    url = "https://panacea.threatgrid.com/api/v2/search/submissions?q=" + value + "&api_key=" + api_key
     headers = {
         'Cache-Control': "no-cache",
         'Content-Type': "application/json",
@@ -469,7 +469,7 @@ def analyze_string_investigation(indicators):
                                 if to_address not in global_targets_list:
                                     global_targets_list.append(to_address)
 
-            if module['module'] == 'Threat Grid':
+            if module['module'] == 'AMP File Reputation':
                 query_threatgrid(indicator['type'], indicator['value'])
 
             if module['module'] == 'Umbrella':
