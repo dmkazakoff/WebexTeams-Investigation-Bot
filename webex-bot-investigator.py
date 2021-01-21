@@ -531,11 +531,16 @@ def delete_room(room_id):
         'Authorization': 'Bearer ' + bearer
     }
 
-    requests.request("DELETE", url, headers=headers, data=payload)
-    print("    === ROOM DELETED ===")
+    response = requests.request("DELETE", url, headers=headers, data=payload)
+    # print(response.status_code)
+    # print(response.content)
+    if (response.status_code >= 400):
+        print("    === ROOM DELETE FAILED => ", json.loads(response.text)['message'])
+    else:
+        print("    === ROOM DELETED ===")
 
 def delete_membership(membership_id):
-    # DOES NOT DELETE 1-to-1 ROOMS
+    # DOES NOT DELETE 1-to-1 Direct Chats
     url = "https://api.ciscospark.com/v1/memberships/" + membership_id
     payload = {}
     headers = {
@@ -543,8 +548,14 @@ def delete_membership(membership_id):
         'Authorization': 'Bearer ' + bearer
     }
 
-    requests.request("DELETE", url, headers=headers, data=payload)
-    print("    === MEMBERSHIP DELETED ===")
+    response = requests.request("DELETE", url, headers=headers, data=payload)
+    # print(response.status_code)
+    # print(response.text)
+    # print(json.loads(response.text)['message'])
+    if (response.status_code >= 400):
+        print("    === MEMBERSHIP DELETE FAILED => ", json.loads(response.text)['message'])
+    else:
+        print("    === MEMBERSHIP DELETED ===")
 
 def get_bot_status():
 
@@ -575,10 +586,10 @@ def get_bot_status():
 
     response = requests.request("GET", url, headers=headers, data=payload)
     data = json_loads_byteified(response.text)
-    print("Removing unneeded memberships:")
+    print("Removing unneeded memberships")
     if 'items' in data:
         for membership in data['items']:
-            if membership['roomId'] != roomid_filter:
+            if membership['roomId'] != roomid_filter and membership['roomType'] != 'direct':
                 delete_membership(membership['id'])
 
     url = "https://api.ciscospark.com/v1/rooms"
@@ -591,12 +602,14 @@ def get_bot_status():
 
     response = requests.request("GET", url, headers=headers, data=payload)
     data = json_loads_byteified(response.text)
-    print("Bot is currently member of Webex Rooms:")
+    print("Bot is currently member of Webex Rooms (Can't remove direct rooms):")
     if 'items' in data:
         for room in data['items']:
-            print(" => Title: {}".format(room['title'].encode('utf8')))
-            print("     ID: {}".format(room['id']))
             if room['id'] != roomid_filter:
+                print(" => Title: {}".format(room['title'].encode('utf8')))
+            else:
+                print(" => Title: {} <= CURRENT WORKROOM".format(room['title'].encode('utf8')))
+            if room['id'] != roomid_filter and room['type'] != 'direct':
                 delete_room(room['id'])
 
     url = "https://api.ciscospark.com/v1/webhooks"
