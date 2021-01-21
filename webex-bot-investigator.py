@@ -20,7 +20,7 @@ ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
 # USED FOR OFF-LINE DEBUG
-debug_flag = True
+debug_flag = False
 
 regex = '''^(25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
             25[0-5]|2[0-4][0-9]|[0-1]?[0-9][0-9]?)\.( 
@@ -534,8 +534,52 @@ def delete_room(room_id):
     requests.request("DELETE", url, headers=headers, data=payload)
     print("    === ROOM DELETED ===")
 
+def delete_membership(membership_id):
+    # DOES NOT DELETE 1-to-1 ROOMS
+    url = "https://api.ciscospark.com/v1/memberships/" + membership_id
+    payload = {}
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + bearer
+    }
+
+    requests.request("DELETE", url, headers=headers, data=payload)
+    print("    === MEMBERSHIP DELETED ===")
 
 def get_bot_status():
+
+    # Get Sherloks personal details:
+    url = "https://api.ciscospark.com/v1/people/me"
+
+    payload = {}
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': "Bearer " + bearer
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+    data = json_loads_byteified(response.text)
+    print("Sherloks personId is:", data['id'])
+    sherloks_personid = data['id']
+
+    # Get Sherloks membersip details:
+
+    url = "https://api.ciscospark.com/v1/memberships"
+
+    payload = {}
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': "Bearer " + bearer,
+        'personId': sherloks_personid
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+    data = json_loads_byteified(response.text)
+    print("Removing unneeded memberships:")
+    if 'items' in data:
+        for membership in data['items']:
+            if membership['roomId'] != roomid_filter:
+                delete_membership(membership['id'])
 
     url = "https://api.ciscospark.com/v1/rooms"
 
