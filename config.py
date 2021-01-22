@@ -27,4 +27,16 @@ ctr_client_password = 'xxxxxxxxxxxxxxxxxxxx'
 protectednet = '10.0.0.0/8'
 protecteddomain = 'example.com'
 
+# EMAIL REPORT CONFIG #
+enable_email = True
+mail_to = 'reports@example.com'
+mail_from = 'sherlok@example.com'
+smtp = {
+  'host': '192.168.1.1',
+  'port': 25,
+  'tls': False,
+  'ssl': False,
+  'user': 'username',
+  'password': 'password',
+}
 # ********************************************************* #

@@ -6,6 +6,7 @@ import sys
 import math
 import requests
 import numpy
+import mdmail
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from operator import itemgetter
@@ -59,7 +60,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         global investigation_report
         webhook = json.loads(body)
-        result = send_spark_get('https://api.ciscospark.com/v1/messages/{0}'.format(webhook['data']['id']))
+        result = send_spark_get('https://api.ciscospark.com/v1/messages/{0}'.format(webhook['data']['id'])).text
         result = json.loads(result)
         if webhook['data']['personEmail'] != bot_email:
             in_message = result.get('text', '').lower()
@@ -80,6 +81,10 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                 send_spark_post("https://api.ciscospark.com/v1/messages",
                                 {"roomId": webhook['data']['roomId'],
                                  "markdown": "***  \n" + '  \n'.join(investigation_report) + "\n\n***"})
+                if enable_email == True:
+                    print('Sending Email Report!')
+                    mdmail.send("***  \n" + '  \n'.join(investigation_report) + "\n\n***", subject='Sherlok Report',
+                                from_email=mail_from, to_email=mail_to, smtp=smtp)
 
                 send_spark_post("https://api.ciscospark.com/v1/messages",
                                 {"roomId": webhook['data']['roomId'],
@@ -131,7 +136,7 @@ def send_spark_get(url):
     }
 
     response = http.get(url, headers=headers)
-    return response.text
+    return response
 
 
 def send_spark_post(url, data):
@@ -144,7 +149,7 @@ def send_spark_post(url, data):
         "Accept": "application/json",
         'Authorization': 'Bearer ' + bearer
     }
-    print('ByteSize: ' + str(sys.getsizeof(payload)))
+
     if sys.getsizeof(payload) > 7200:
         print('ByteSize: ' + str(sys.getsizeof(payload)) + ' MSG too large, splitting!')
         listpayload = json.dumps(data['markdown']).split('\\n')
@@ -152,6 +157,7 @@ def send_spark_post(url, data):
         for msg_array in array_of_msgs:
             send_spark_post(url, {"roomId": roomid_filter,
                                  "markdown": '\n'.join(msg_array).strip('"')})
+
     else:
         response = http.post(url, headers=headers, data=payload)
         if 'text' in json.loads(response.text):
@@ -159,7 +165,14 @@ def send_spark_post(url, data):
                 progress_msg_id = json.loads(response.text)['id']
 
         print("POST => Code: " + str(response.status_code) + ' Length: ' + str(len(payload)) + ' ByteSize: ' + str(sys.getsizeof(payload)))
-        return response.text
+        # if int(response.status_code) >=400:
+        #     print(response.text)
+        # else:
+        #     print('MSGCode: ' + json.loads(response.text)['id'])
+        if 'id' in json.loads(response.text):
+            return response.text, json.loads(response.text)['id']
+        else:
+            return response.text, ''
 
 def send_spark_put(url, data):
 
@@ -175,7 +188,7 @@ def send_spark_put(url, data):
     response = http.put(url, headers=headers, data=payload)
     print("PUT => Code: " + str(response.status_code) + ' Length: ' + str(len(payload)) + ' ByteSize: ' + str(
         sys.getsizeof(payload)))
-    return response.text
+    return response.text, response.status_code
 
 def update_progress_msg(new_msg):
 
@@ -185,10 +198,14 @@ def update_progress_msg(new_msg):
     if (progress_msg_id != ''):
         url = "https://api.ciscospark.com//v1/messages/" + progress_msg_id
 
-        data = json_loads_byteified(send_spark_get(url))
+        data = json_loads_byteified(send_spark_get(url).text)
         progress_msg_text = data['markdown'] + '\n' + new_msg
 
-        send_spark_put(url, {"roomId": roomid_filter, "markdown": progress_msg_text})
+        response, status_code = send_spark_put(url, {"roomId": roomid_filter, "markdown": progress_msg_text})
+        if int(status_code) >= 400:
+            url = 'https://api.ciscospark.com/v1/messages'
+            response, progress_msg_id = send_spark_post(url, {"roomId": roomid_filter, "markdown": progress_msg_text})
+        # print(response)
 
 def ip_to_binary(ip):
     octet_list_int = ip.split(".")
@@ -233,6 +250,7 @@ def query_threatgrid(type, value):
     }
 
     response = http.get(url, headers=headers)
+
     data = json_loads_byteified(response.text)
     iocs_list = []
     iocs_dict = []
@@ -250,8 +268,13 @@ def query_threatgrid(type, value):
                             iocs_dict.append({'threat': ioc['threat'], 'title': ioc['title']})
 
     sorted_d = sorted(iocs_dict, key=itemgetter('threat'), reverse=True)
+    count = 0
     for ioc in sorted_d:
-        webex_print("- *Indicator*: ", str(ioc['threat']) + ' - ' + ioc['title'])
+        if count > 10:
+            webex_print("", '*... results limited to 10*')
+            break
+        count = count + 1
+        webex_print("- *Indicator* for " + value + ' => ', str(ioc['threat']) + ' - ' + ioc['title'])
 
 
 def get_umbrella_categories_list():
@@ -397,6 +420,7 @@ def analyze_string_investigation(indicators):
     # for indicator in result_loads:
     response = client.enrich.observe.observables(indicators_parse)
     result_dump = json.dumps(response)
+
     if debug_flag:
         print(result_dump)
     result_loads = json.loads(result_dump)
@@ -409,7 +433,7 @@ def analyze_string_investigation(indicators):
 
         if "verdicts" in module['data']:
             for doc in module['data']['verdicts']['docs']:
-                webex_print("- *Verdict*: ", doc['disposition_name'])
+                webex_print("- *Verdict* for " + doc['observable']['value'] + ' => ', doc['disposition_name'])
         if "judgements" in module['data']:
             judgement_list = []
             for doc in module['data']['judgements']['docs']:
@@ -418,7 +442,7 @@ def analyze_string_investigation(indicators):
                     comment = doc['reason']
                 elif 'source' in doc:
                     comment = doc['source']
-                string_event = doc['disposition_name'] + ' -> ' + comment
+                string_event = doc['observable']['value'] + ' => ' + doc['disposition_name'] + ' (' + comment + ')'
                 if string_event not in judgement_list:
                     judgement_list.append(string_event)
             count = 0
@@ -430,6 +454,7 @@ def analyze_string_investigation(indicators):
                 webex_print("- *Judgements*: ", judgement)
         if "indicators" in module['data']:
             count = 0
+            indicators_list = []
             for doc in module['data']['indicators']['docs']:
                 if count > 10:
                     webex_print("", '*... results limited to 10*')
@@ -439,7 +464,10 @@ def analyze_string_investigation(indicators):
                     description = doc['short_description']
                 else:
                     description = doc['description']
-                webex_print("- *Indicator*: ", description)
+                if description not in indicators_list:
+                    indicators_list.append(description)
+                for indicator_item in indicators_list:
+                    webex_print("- *Indicator*: ", indicator_item)
 
         # SIGHTINGS FOR OTHER
         if module['module'] == 'Firepower' or module['module'] == 'Private Intelligence' or module['module'] == 'Stealthwatch Enterprise' or module['module'] == 'VirusTotal':
@@ -481,8 +509,10 @@ def analyze_string_investigation(indicators):
             if 'sightings' in module['data']:
                 targets_list = []
                 targets_list_dicts = []
+                relations = []
                 for doc in module['data']['sightings']['docs']:
                     if 'targets' in doc:
+                        hostname = ""
                         for target in doc['targets']:
                             hostname = ""
                             ip = ""
@@ -504,10 +534,17 @@ def analyze_string_investigation(indicators):
                                         else:
                                             ip_address = ''
                                         global_targets_list.append(hostname + ip_address)
+                        if 'relations' in doc:
+                            for relation in doc['relations']:
+                                if {'hostname': hostname, 'relation': relation['relation'], 'source': relation['source']['value'], 'related': relation['related']['value']} not in relations:
+                                    relations.append({'hostname': hostname, 'relation': relation['relation'], 'source': relation['source']['value'], 'related': relation['related']['value']})
                 for target in targets_list_dicts:
                     webex_print("- *Target*: ",
                                 "Hostname: " + target['hostname'] + " IP: " + target['ip'] + " MAC: " + target[
                                     'mac'])
+                    for relation in relations:
+                        if relation['hostname'] == target['hostname']:
+                            webex_print("  - *Sighting*: ", relation['relation'] + ' src: ' + relation['source'] + ' related: ' + relation['related'])
 
         # SIGHTINGS FOR ESA
         if module['module'] == 'SMA Email':
@@ -547,7 +584,7 @@ def analyze_string_investigation(indicators):
 
         if module['module'] == 'AMP File Reputation':
             for indicator in result_indicator_loads:
-                update_progress_msg('    * ThreatGrid direct query for' + indicator['value'])
+                update_progress_msg('    * ThreatGrid direct query for ' + indicator['value'])
                 query_threatgrid(indicator['type'], indicator['value'])
 
         if module['module'] == 'Umbrella':
