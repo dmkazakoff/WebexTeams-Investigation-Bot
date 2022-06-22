@@ -1,4 +1,4 @@
 requests==2.21.0
 mdmail==0.1.3
-numpy==1.19.5
+numpy==1.22.0
 threatresponse==0.10.0
